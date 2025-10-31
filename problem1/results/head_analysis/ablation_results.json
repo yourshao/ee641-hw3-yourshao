@@ -1,0 +1,27 @@
+{
+  "baseline": 0.5495,
+  "enc_l0_h0": 0.547,
+  "enc_l0_h1": 0.035,
+  "enc_l0_h2": 0.0085, =======
+  "enc_l0_h3": 0.006,   =======
+  "enc_l1_h0": 0.2245,
+  "enc_l1_h1": 0.422,
+  "enc_l1_h2": 0.066,
+  "enc_l1_h3": 0.1765,
+  "decSelf_l0_h0": 0.5075,
+  "decSelf_l0_h1": 0.5525,
+  "decSelf_l0_h2": 0.5495,
+  "decSelf_l0_h3": 0.538,
+  "decSelf_l1_h0": 0.008,
+  "decSelf_l1_h1": 0.439,
+  "decSelf_l1_h2": 0.0495,
+  "decSelf_l1_h3": 0.1035,
+  "decCross_l0_h0": 0.55,
+  "decCross_l0_h1": 0.554,
+  "decCross_l0_h2": 0.557,
+  "decCross_l0_h3": 0.554,
+  "decCross_l1_h0": 0.2285,
+  "decCross_l1_h1": 0.2745,
+  "decCross_l1_h2": 0.3005,
+  "decCross_l1_h3": 0.209
+}

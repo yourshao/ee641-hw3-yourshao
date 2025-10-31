@@ -27,12 +27,17 @@ class SinusoidalPositionalEncoding(nn.Module):
         """
         super().__init__()
         self.d_model = d_model
+        self.max_len = max_len
+        # Create positional encoding matrix [max_len, d_model]
+        position = torch.arange(0, max_len).unsqueeze(1)                    # [max_len, 1]
+        div_term = torch.exp(torch.arange(0, d_model, 2) *
+                             (-math.log(10000.0) / d_model))                  # [d_model/2]
+        pe = torch.zeros(max_len, d_model)
+        pe[:, 0::2] = torch.sin(position * div_term)                      # even indices
+        pe[:, 1::2] = torch.cos(position * div_term)                        # odd indices
 
-        # TODO: Create positional encoding matrix
-        # Shape should be [max_len, d_model]
-        # Use the sinusoidal formula for positions
-
-        # TODO: Register as buffer (not trainable parameter)
+        # Register as buffer (non-trainable)
+        self.register_buffer('pe', pe)
 
     def forward(self, x):
         """
@@ -46,11 +51,18 @@ class SinusoidalPositionalEncoding(nn.Module):
         """
         seq_len = x.size(1)
 
-        # TODO: Add positional encoding to input
-        # For sequences longer than max_len, compute sinusoidal values on-the-fly
-        # Use the same formula from __init__ to compute positions dynamically
+        if seq_len <= self.max_len:
+            pe = self.pe[:seq_len]
+        else:
+            # Compute sinusoidal values on-the-fly for longer sequences
+            position = torch.arange(0, seq_len, device=x.device).unsqueeze(1)
+            div_term = torch.exp(torch.arange(0, self.d_model, 2, device=x.device) *
+                                 (-math.log(10000.0) / self.d_model))
+            pe = torch.zeros(seq_len, self.d_model, device=x.device)
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
 
-        raise NotImplementedError
+        return x + pe.unsqueeze(0)  # [1, seq_len, d_model]
 
 
 class LearnedPositionalEncoding(nn.Module):
@@ -73,10 +85,10 @@ class LearnedPositionalEncoding(nn.Module):
         self.d_model = d_model
         self.max_len = max_len
 
-        # TODO: Create learnable position embeddings
-        # Use nn.Embedding with max_len positions
+        self.position_embeddings = nn.Embedding(max_len, d_model)
 
-        # TODO: Initialize embeddings (e.g., normal distribution)
+        # Initialize embeddings (normal distribution)
+        nn.init.normal_(self.position_embeddings.weight, mean=0.0, std=0.02)
 
     def forward(self, x):
         """
@@ -90,13 +102,13 @@ class LearnedPositionalEncoding(nn.Module):
         """
         batch_size, seq_len, _ = x.size()
 
-        # TODO: Get position indices using torch.arange(seq_len, device=x.device)
-        # For extrapolation: use torch.clamp(positions, max=self.max_len-1)
+        # Get position indices
+        positions = torch.arange(seq_len, device=x.device)
+        positions = torch.clamp(positions, max=self.max_len - 1)
 
-        # TODO: Look up position embeddings using self.position_embeddings
-        # TODO: Add to input and return
-
-        raise NotImplementedError
+        # Look up embeddings and add
+        pos_embed = self.position_embeddings(positions)  # [seq_len, d_model]
+        return x + pos_embed.unsqueeze(0)  # [1, seq_len, d_model]
 
 
 class NoPositionalEncoding(nn.Module):
@@ -128,9 +140,7 @@ class NoPositionalEncoding(nn.Module):
         Returns:
             x unchanged
         """
-        # TODO: Return input without modification
-
-        raise NotImplementedError
+        return x
 
 
 def get_positional_encoding(encoding_type, d_model, max_len=5000):

@@ -51,8 +51,13 @@ def evaluate_extrapolation(model, data_dir, test_lengths, device, batch_size=32)
                 labels = batch['label'].to(device)
                 masks = batch['mask'].to(device)
 
-                # TODO: Get predictions
-                # TODO: Count correct predictions
+                # Forward + predictions
+                logits = model(sequences, masks)
+                preds = logits.argmax(dim=1)
+
+                # Count
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
 
         accuracy = correct / total
         results[length] = accuracy
@@ -107,7 +112,8 @@ def plot_extrapolation_curves(all_results, save_path):
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)
-    plt.show()
+    # plt.show()
+    plt.close()
     print(f"Saved extrapolation curves to {save_path}")
 
 
@@ -126,24 +132,28 @@ def visualize_learned_positions(model_path, output_dir, max_positions=128):
     # Load model
     model = create_model(encoding_type='learned')
     model.load_state_dict(torch.load(model_path, map_location='cpu'))
-
+    model.eval()
     # Extract learned positional embeddings
     pos_encoding = model.pos_encoding
 
-    # TODO: Extract embedding weights
-    # For learned encoding, this should be from pos_encoding.position_embeddings
+    weights = pos_encoding.position_embeddings.weight.detach().cpu().numpy()
 
-    # Visualize embeddings as heatmap
-    plt.figure(figsize=(12, 8))
+    # Slice to first max_positions
+    mat = weights[:max_positions]  # [max_positions, d_model]
 
-    # TODO: Create heatmap of position embeddings
-    # Show first max_positions positions and all dimensions
-    # Include xlabel, ylabel, title, and colorbar
+    # Heatmap
+    plt.figure(figsize=(12, 6))
+    im = plt.imshow(mat, aspect='auto', cmap='RdBu_r')
+    plt.xlabel('Dimension')
+    plt.ylabel('Position')
+    plt.title('Learned Positional Embeddings (first {} positions)'.format(max_positions))
+    plt.colorbar(im)
 
     save_path = output_dir / 'learned_position_embeddings.png'
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)
-    plt.show()
+    # plt.show()
+    plt.close()
     print(f"Saved position embeddings visualization to {save_path}")
 
 
@@ -202,7 +212,8 @@ def compare_position_encodings(output_dir, d_model=128, max_len=128):
 
     save_path = output_dir / 'encoding_comparison.png'
     plt.savefig(save_path, dpi=150)
-    plt.show()
+    # plt.show()
+    plt.close()
     print(f"Saved encoding comparison to {save_path}")
 
 
@@ -270,6 +281,7 @@ def main():
     parser.add_argument('--output-dir', default='results/extrapolation',
                         help='Output directory for analysis')
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--d-model', type=int, default=64, help='dimensionality of model')
     parser.add_argument('--test-lengths', type=int, nargs='+',
                         default=[8, 12, 16, 32, 64, 128, 256],
                         help='Sequence lengths to test')
@@ -325,7 +337,7 @@ def main():
         )
 
     # Compare encoding strategies
-    compare_position_encodings(output_dir / 'encoding_comparison')
+    compare_position_encodings(output_dir / 'encoding_comparison', d_model=args.d_model)
 
     # Analyze failure cases for learned encoding at length 64
     if 'learned' in all_results:

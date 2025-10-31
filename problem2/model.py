@@ -99,7 +99,7 @@ class SortingClassifier(nn.Module):
     def __init__(
         self,
         vocab_size=101,  # 0-99 for integers + 100 for padding
-        d_model=128,
+        d_model=64,
         num_heads=4,
         num_layers=4,
         d_ff=512,
@@ -162,10 +162,13 @@ class SortingClassifier(nn.Module):
         x = self.pos_encoding(x)
         x = self.dropout(x)
 
-        # Reshape mask for attention: [batch, seq_len] -> [batch, 1, 1, seq_len]
+        if mask is not None:
+            x = x * mask.unsqueeze(-1)
+
+
         attn_mask = None
         if mask is not None:
-            attn_mask = mask.unsqueeze(1).unsqueeze(1)
+            attn_mask = mask.bool().unsqueeze(1).unsqueeze(1)
 
         # Pass through encoder layers
         for layer in self.encoder_layers:

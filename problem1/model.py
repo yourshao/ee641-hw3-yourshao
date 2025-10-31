@@ -21,13 +21,23 @@ class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super().__init__()
 
-        # TODO: Create positional encoding matrix
-        # TODO: Register as buffer (not a parameter)
+        # Create positional encoding matrix [max_len, d_model]
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # [max_len, 1]
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2, dtype=torch.float) * (-math.log(10000.0) / d_model)
+        )  # [d_model/2]
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        # Register as buffer so it moves with the module but isn't a parameter
+        self.register_buffer("pe", pe.unsqueeze(0))  # [1, max_len, d_model]
 
     def forward(self, x):
         """Add positional encoding to input embeddings."""
-        # TODO: Add positional encoding to x
-        raise NotImplementedError
+        seq_len = x.size(1)
+        return x + self.pe[:, :seq_len, :]
 
 
 class FeedForward(nn.Module):
@@ -40,7 +50,10 @@ class FeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super().__init__()
 
-        # TODO: Initialize two linear layers and dropout
+        # Two linear layers and dropout
+        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc2 = nn.Linear(d_ff, d_model)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         """
@@ -52,8 +65,7 @@ class FeedForward(nn.Module):
         Returns:
             Output tensor [batch, seq_len, d_model]
         """
-        # TODO: Implement feed-forward with ReLU activation
-        raise NotImplementedError
+        return self.fc2(self.dropout(F.relu(self.fc1(x))))
 
 
 class EncoderLayer(nn.Module):
@@ -67,11 +79,17 @@ class EncoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
         super().__init__()
 
-        # TODO: Initialize components
-        # - self-attention
-        # - feed-forward
-        # - layer normalizations
-        # - dropout layers
+        # Components
+        self.self_attn = MultiHeadAttention(d_model, num_heads)
+        self.ffn = FeedForward(d_model, d_ff, dropout)
+
+        # Layer norms
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+
+        # Dropouts
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x, mask=None):
         """
@@ -84,12 +102,17 @@ class EncoderLayer(nn.Module):
         Returns:
             Output tensor [batch, seq_len, d_model]
         """
-        # TODO: Self-attention with residual
-        # TODO: Layer norm
-        # TODO: Feed-forward with residual
-        # TODO: Layer norm
+        # Self-attention + residual
+        attn_out, _ = self.self_attn(x, x, x, mask=mask)
+        x = x + self.dropout1(attn_out)
+        x = self.norm1(x)
 
-        raise NotImplementedError
+        # Feed-forward + residual
+        ff_out = self.ffn(x)
+        x = x + self.dropout2(ff_out)
+        x = self.norm2(x)
+
+        return x
 
 
 class DecoderLayer(nn.Module):
@@ -103,12 +126,20 @@ class DecoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
         super().__init__()
 
-        # TODO: Initialize components
-        # - masked self-attention
-        # - encoder-decoder cross-attention
-        # - feed-forward
-        # - layer normalizations
-        # - dropout layers
+        # Components
+        self.self_attn = MultiHeadAttention(d_model, num_heads)
+        self.cross_attn = MultiHeadAttention(d_model, num_heads)
+        self.ffn = FeedForward(d_model, d_ff, dropout)
+
+        # Layer norms
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+
+        # Dropouts
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
 
     def forward(self, x, encoder_output, src_mask=None, tgt_mask=None):
         """
@@ -123,14 +154,23 @@ class DecoderLayer(nn.Module):
         Returns:
             Output tensor [batch, tgt_len, d_model]
         """
-        # TODO: Masked self-attention with residual
-        # TODO: Layer norm
-        # TODO: Cross-attention with residual
-        # TODO: Layer norm
-        # TODO: Feed-forward with residual
-        # TODO: Layer norm
+        # Masked self-attention + residu
 
-        raise NotImplementedError
+        self_attn_out, _ = self.self_attn(x, x, x, mask=tgt_mask)
+        x = x + self.dropout1(self_attn_out)
+        x = self.norm1(x)
+
+        # Cross-attention + residual
+        cross_out, _ = self.cross_attn(x, encoder_output, encoder_output, mask=src_mask)
+        x = x + self.dropout2(cross_out)
+        x = self.norm2(x)
+
+        # Feed-forward + residual
+        ff_out = self.ffn(x)
+        x = x + self.dropout3(ff_out)
+        x = self.norm3(x)
+
+        return x
 
 
 class Seq2SeqTransformer(nn.Module):
@@ -139,15 +179,15 @@ class Seq2SeqTransformer(nn.Module):
     """
 
     def __init__(
-        self,
-        vocab_size,
-        d_model=128,
-        num_heads=4,
-        num_encoder_layers=2,
-        num_decoder_layers=2,
-        d_ff=512,
-        dropout=0.1,
-        max_len=100
+            self,
+            vocab_size,
+            d_model=128,
+            num_heads=4,
+            num_encoder_layers=2,
+            num_decoder_layers=2,
+            d_ff=512,
+            dropout=0.1,
+            max_len=100
     ):
         super().__init__()
 
@@ -161,8 +201,13 @@ class Seq2SeqTransformer(nn.Module):
         # Positional encoding
         self.pos_encoding = PositionalEncoding(d_model, max_len)
 
-        # TODO: Initialize encoder layers
-        # TODO: Initialize decoder layers
+        # Encoder / Decoder stacks
+        self.encoder_layers = nn.ModuleList(
+            [EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_encoder_layers)]
+        )
+        self.decoder_layers = nn.ModuleList(
+            [DecoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_decoder_layers)]
+        )
 
         # Output projection
         self.output_projection = nn.Linear(d_model, vocab_size)
@@ -195,9 +240,11 @@ class Seq2SeqTransformer(nn.Module):
         x = self.pos_encoding(x)
         x = self.dropout(x)
 
-        # TODO: Pass through encoder layers
+        # Pass through encoder layers
+        for layer in self.encoder_layers:
+            x = layer(x, mask=src_mask)
 
-        raise NotImplementedError
+        return x
 
     def decode(self, tgt, encoder_output, src_mask=None, tgt_mask=None):
         """
@@ -217,9 +264,11 @@ class Seq2SeqTransformer(nn.Module):
         x = self.pos_encoding(x)
         x = self.dropout(x)
 
-        # TODO: Pass through decoder layers
+        # Pass through decoder layers
+        for layer in self.decoder_layers:
+            x = layer(x, encoder_output, src_mask=src_mask, tgt_mask=tgt_mask)
 
-        raise NotImplementedError
+        return x
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None):
         """
@@ -234,11 +283,10 @@ class Seq2SeqTransformer(nn.Module):
         Returns:
             Output logits [batch, tgt_len, vocab_size]
         """
-        # TODO: Encode source
-        # TODO: Decode target
-        # TODO: Project to vocabulary
-
-        raise NotImplementedError
+        encoder_output = self.encode(src, src_mask=src_mask)
+        decoder_output = self.decode(tgt, encoder_output, src_mask=src_mask, tgt_mask=tgt_mask)
+        logits = self.output_projection(decoder_output)
+        return logits
 
     def generate(self, src, max_len=20, start_token=0):
         """

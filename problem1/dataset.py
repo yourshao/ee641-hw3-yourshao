@@ -37,8 +37,8 @@ class AdditionDataset(Dataset):
             self.data = json.load(f)
 
         # Determine max lengths for padding
-        self.max_input_len = max(len(s['input']) for s in self.data) if self.data else 0
-        self.max_target_len = max(len(s['target']) for s in self.data) if self.data else 0
+        # self.max_input_len = max(len(s['input']) for s in self.data) if self.data else 0
+        # self.max_target_len = max(len(s['target']) for s in self.data) if self.data else 0
 
     def __len__(self):
         return len(self.data)
@@ -65,14 +65,16 @@ class AdditionDataset(Dataset):
         target_len = target_seq.size(0)
 
         # Pad sequences to dataset max length
-        if self.max_input_len > input_len:
-            input_seq = torch.nn.functional.pad(
-                input_seq, (0, self.max_input_len - input_len), value=self.pad_token
-            )
-        if self.max_target_len > target_len:
-            target_seq = torch.nn.functional.pad(
-                target_seq, (0, self.max_target_len - target_len), value=self.pad_token
-            )
+        # if self.max_input_len > input_len:
+        #     input_seq = torch.nn.functional.pad(
+        #         input_seq, (0, self.max_input_len - input_len), value=self.pad_token
+        #     )
+        # if self.max_target_len > target_len:
+        #     target_seq = torch.nn.functional.pad(
+        #         target_seq, (0, self.max_target_len - target_len), value=self.pad_token
+        #     )
+
+
 
         return {
             'input': input_seq,

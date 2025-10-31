@@ -28,54 +28,72 @@ def compute_accuracy(outputs, targets, pad_token=0):
     Returns:
         Accuracy (fraction of completely correct sequences)
     """
-    # TODO: Get predicted tokens from logits
-    # TODO: Create mask for non-padding positions
-    # TODO: Check if entire sequence matches (excluding padding)
+    # preds = outputs.argmax(dim=-1)  # [B, T]
+    #
+    # mask = (targets != pad_token).long()
+    #
+    # correct_per_pos = (preds == targets) | (mask == 0)
+    # correct_seq = correct_per_pos.all(dim=1).float()  # [B]
+    # return correct_seq.mean().item()
 
-    raise NotImplementedError
+    preds = outputs.argmax(dim=-1)
+    correct_seq = (preds == targets).all(dim=1).float()
+    return correct_seq.mean().item()
+
+
+def _make_masks(inputs, dec_inp, pad_token=0, device=None):
+
+    device = device or inputs.device
+    # src padding mask: [B, 1, 1, S]
+    # src_pad = (inputs != pad_token).unsqueeze(1).unsqueeze(1).to(inputs.dtype)
+    # tgt_pad = (dec_inp != pad_token).unsqueeze(1).unsqueeze(1).to(inputs.dtype)
+    # causal = create_causal_mask(dec_inp.size(1), device=device)  # {0,1}
+
+    # tgt_mask = (tgt_pad * causal).to(dec_inp.dtype)
+    # src_mask = src_pad
+
+    src_mask = None
+    tgt_mask = create_causal_mask(dec_inp.size(1), device=device)
+
+    return src_mask, tgt_mask
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
     """
     Train for one epoch.
-
-    Args:
-        model: Transformer model
-        dataloader: Training dataloader
-        criterion: Loss function
-        optimizer: Optimizer
-        device: Device to run on
-
-    Returns:
-        Average loss, average accuracy
     """
     model.train()
-    total_loss = 0
-    total_acc = 0
+    total_loss = 0.0
+    total_acc = 0.0
     num_batches = 0
 
     progress = tqdm(dataloader, desc="Training")
     for batch in progress:
         # Move to device
-        inputs = batch['input'].to(device)
-        targets = batch['target'].to(device)
+        inputs = batch['input'].to(device)     # [B, S]
+        targets = batch['target'].to(device)   # [B, T]
 
-        # TODO: Prepare decoder input and output for teacher forcing
-        # Decoder input should be targets shifted right (exclude last token)
-        # Decoder output should be targets shifted left (exclude first token)
+        dec_inp = targets[:, :-1]              # [B, T-1]
+        dec_out = targets[:, 1:]               # [B, T-1]
 
-        # TODO: Create causal mask for decoder (using shifted sequence length)
-        # TODO: Forward pass
-        # TODO: Compute loss
-        # Hint: Flatten for cross entropy - need 2D tensors
-        # TODO: Backward pass and optimization
-        # TODO: Compute accuracy
+        # Masks
+        src_mask, tgt_mask = _make_masks(inputs, dec_inp, pad_token=0, device=device)
 
-        # Update progress bar
-        progress.set_postfix({
-            'loss': f'{loss.item():.4f}',
-            'acc': f'{acc:.2%}'
-        })
+        # Forward
+        logits = model(inputs, dec_inp, src_mask=src_mask, tgt_mask=tgt_mask)  # [B, T-1, V]
+
+        B, Tm1, V = logits.size()
+        loss = criterion(logits.reshape(B * Tm1, V), dec_out.reshape(B * Tm1))
+
+        # Backprop
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+
+        acc = compute_accuracy(logits, dec_out, pad_token=0)
+
+        # Progress
+        progress.set_postfix({'loss': f'{loss.item():.4f}', 'acc': f'{acc:.2%}'})
 
         total_loss += loss.item()
         total_acc += acc
@@ -87,19 +105,10 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
 def evaluate(model, dataloader, criterion, device):
     """
     Evaluate model on validation/test set.
-
-    Args:
-        model: Transformer model
-        dataloader: Evaluation dataloader
-        criterion: Loss function
-        device: Device to run on
-
-    Returns:
-        Average loss, average accuracy
     """
     model.eval()
-    total_loss = 0
-    total_acc = 0
+    total_loss = 0.0
+    total_acc = 0.0
     num_batches = 0
 
     with torch.no_grad():
@@ -107,10 +116,17 @@ def evaluate(model, dataloader, criterion, device):
             inputs = batch['input'].to(device)
             targets = batch['target'].to(device)
 
-            # TODO: Prepare decoder input and output (same as training)
-            # TODO: Create causal mask (using shifted sequence length)
-            # TODO: Forward pass
-            # TODO: Compute loss and accuracy (flatten for cross entropy)
+            dec_inp = targets[:, :-1]
+            dec_out = targets[:, 1:]
+
+            src_mask, tgt_mask = _make_masks(inputs, dec_inp, pad_token=0, device=device)
+
+            logits = model(inputs, dec_inp, src_mask=src_mask, tgt_mask=tgt_mask)
+
+            B, Tm1, V = logits.size()
+            loss = criterion(logits.reshape(B * Tm1, V), dec_out.reshape(B * Tm1))
+
+            acc = compute_accuracy(logits, dec_out, pad_token=0)
 
             total_loss += loss.item()
             total_acc += acc
@@ -136,21 +152,21 @@ def main():
 
     args = parser.parse_args()
 
-    # Set random seed
+    # Seed
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
 
-    # Create output directory
+    # Output dir
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load data
+    # Data
     train_loader, val_loader, test_loader = create_dataloaders(
         args.data_dir, args.batch_size
     )
 
-    # Create model
+    # Model
     vocab_size = get_vocab_size()
     model = Seq2SeqTransformer(
         vocab_size=vocab_size,
@@ -162,12 +178,15 @@ def main():
         dropout=args.dropout
     ).to(args.device)
 
-    # TODO: Initialize optimizer (Adam recommended)
-    # TODO: Initialize learning rate scheduler (ReduceLROnPlateau recommended)
-    # TODO: Initialize loss function (use nn.CrossEntropyLoss)
+    # Optimizer / Scheduler / Loss
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=3, verbose=True
+    )
+    criterion = nn.CrossEntropyLoss()
 
     # Training loop
-    best_val_acc = -1
+    best_val_acc = -1.0
     training_history = {
         'train_loss': [],
         'train_acc': [],
@@ -191,29 +210,30 @@ def main():
             model, val_loader, criterion, args.device
         )
 
-        # TODO: Step learning rate scheduler (pass val_loss)
+        # Scheduler step uses validation loss
+        scheduler.step(val_loss)
 
-        # Log results
+        # Log
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2%}")
-        print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2%}")
+        print(f"Val  Loss: {val_loss:.4f}, Val  Acc: {val_acc:.2%}")
 
         training_history['train_loss'].append(train_loss)
         training_history['train_acc'].append(train_acc)
         training_history['val_loss'].append(val_loss)
         training_history['val_acc'].append(val_acc)
 
-        # Save best model
+        # Save best
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), output_dir / 'best_model.pth')
             print(f"Saved best model with validation accuracy: {val_acc:.2%}")
 
-    # Test final model
-    model.load_state_dict(torch.load(output_dir / 'best_model.pth'))
+    # Test best
+    model.load_state_dict(torch.load(output_dir / 'best_model.pth', map_location=args.device))
     test_loss, test_acc = evaluate(model, test_loader, criterion, args.device)
     print(f"\nTest Loss: {test_loss:.4f}, Test Acc: {test_acc:.2%}")
 
-    # Save training history
+    # Save history
     training_history['test_loss'] = test_loss
     training_history['test_acc'] = test_acc
     with open(output_dir / 'training_log.json', 'w') as f:

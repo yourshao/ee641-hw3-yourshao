@@ -27,13 +27,24 @@ def scaled_dot_product_attention(Q, K, V, mask=None):
     """
     d_k = Q.size(-1)
 
-    # TODO: Compute attention scores
-    # TODO: Scale scores
-    # TODO: Apply mask if provided (use masked_fill to set masked positions to -inf)
-    # TODO: Apply softmax
-    # TODO: Apply attention to values
+    # Compute attention scores: QK^T
+    scores = torch.matmul(Q, K.transpose(-2, -1))  # [..., q, k]
 
-    raise NotImplementedError
+    # Scale scores
+    scores = scores / math.sqrt(d_k)
+
+    # Apply mask (1=keep, 0=mask)
+    if mask is not None:
+        # mask should be broadcastable to scores' shape
+        scores = scores.masked_fill(mask == 0, float("-inf"))
+
+    # Softmax over key dimension
+    attention_weights = F.softmax(scores, dim=-1)
+
+    # Weighted sum of values
+    output = torch.matmul(attention_weights, V)  # [..., q, d_k]
+
+    return output, attention_weights
 
 
 class MultiHeadAttention(nn.Module):
@@ -59,8 +70,13 @@ class MultiHeadAttention(nn.Module):
         self.num_heads = num_heads
         self.d_k = d_model // num_heads
 
-        # TODO: Initialize linear projections for Q, K, V
-        # TODO: Initialize output projection
+        # Linear projections for Q, K, V
+        self.W_q = nn.Linear(d_model, d_model, bias=False)
+        self.W_k = nn.Linear(d_model, d_model, bias=False)
+        self.W_v = nn.Linear(d_model, d_model, bias=False)
+
+        # Output projection
+        self.W_o = nn.Linear(d_model, d_model, bias=False)
 
     def split_heads(self, x):
         """
@@ -73,10 +89,9 @@ class MultiHeadAttention(nn.Module):
             Tensor with shape [batch, num_heads, seq_len, d_k]
         """
         batch_size, seq_len, _ = x.size()
-
-        # TODO: Reshape and transpose to split heads
-
-        raise NotImplementedError
+        # reshape -> [batch, seq_len, num_heads, d_k] -> transpose to [batch, num_heads, seq_len, d_k]
+        x = x.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+        return x
 
     def combine_heads(self, x):
         """
@@ -89,10 +104,9 @@ class MultiHeadAttention(nn.Module):
             Tensor with shape [batch, seq_len, d_model]
         """
         batch_size, _, seq_len, d_k = x.size()
-
-        # TODO: Transpose and reshape to combine heads
-
-        raise NotImplementedError
+        # transpose -> [batch, seq_len, num_heads, d_k] -> reshape to [batch, seq_len, d_model]
+        x = x.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
+        return x
 
     def forward(self, query, key, value, mask=None):
         """
@@ -110,13 +124,31 @@ class MultiHeadAttention(nn.Module):
         """
         batch_size = query.size(0)
 
-        # TODO: Linear projections
-        # TODO: Split heads
-        # TODO: Apply scaled dot-product attention
-        # TODO: Combine heads
-        # TODO: Apply output projection
+        # Linear projections
+        Q = self.W_q(query)  # [B, Lq, d_model]
+        K = self.W_k(key)    # [B, Lk, d_model]
+        V = self.W_v(value)  # [B, Lv, d_model]
 
-        raise NotImplementedError
+        # Split heads
+        Q = self.split_heads(Q)  # [B, H, Lq, d_k]
+        K = self.split_heads(K)  # [B, H, Lk, d_k]
+        V = self.split_heads(V)  # [B, H, Lv, d_k]
+
+        # If mask is provided, make it broadcastable to [B, H, Lq, Lk]
+        if mask is not None and mask.dim() == 3:
+            # e.g., [B, Lq, Lk] -> [B, 1, Lq, Lk]
+            mask = mask.unsqueeze(1)
+
+        # Scaled dot-product attention
+        attn_out, attn_weights = scaled_dot_product_attention(Q, K, V, mask=mask)  # [B,H,Lq,d_k], [B,H,Lq,Lk]
+
+        # Combine heads
+        out = self.combine_heads(attn_out)  # [B, Lq, d_model]
+
+        # Output projection
+        out = self.W_o(out)
+
+        return out, attn_weights
 
 
 def create_causal_mask(seq_len, device=None):

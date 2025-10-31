@@ -1,13 +1,17 @@
 """
 Training script for sorting classifier with different positional encodings.
 """
-
+from collections import Counter
+import random, numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
 import json
 import argparse
+
+from torch.utils.data import DataLoader
+from torch import device
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -41,10 +45,11 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         labels = batch['label'].to(device)
         masks = batch['mask'].to(device)
 
-        # TODO: Forward pass
-        # TODO: Compute loss
-        # TODO: Backward pass
-        # TODO: Update weights
+        logits = model(sequences, masks)
+        loss = criterion(logits, labels)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
         # Compute accuracy
         predictions = logits.argmax(dim=1)
@@ -86,8 +91,8 @@ def evaluate(model, dataloader, criterion, device):
             labels = batch['label'].to(device)
             masks = batch['mask'].to(device)
 
-            # TODO: Forward pass
-            # TODO: Compute loss
+            logits = model(sequences, masks)
+            loss = criterion(logits, labels)
 
             # Compute accuracy
             predictions = logits.argmax(dim=1)
@@ -139,14 +144,14 @@ def main():
                         required=True, help='Positional encoding type')
     parser.add_argument('--data-dir', default='data', help='Data directory')
     parser.add_argument('--output-dir', default='results', help='Output directory')
-    parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
-    parser.add_argument('--epochs', type=int, default=30, help='Number of epochs')
-    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
-    parser.add_argument('--d-model', type=int, default=128, help='Model dimension')
+    parser.add_argument('--batch-size', type=int, default=128, help='Batch size')
+    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
+    parser.add_argument('--lr', type=float, default=5e-3, help='Learning rate-3')
+    parser.add_argument('--d-model', type=int, default=64, help='Model dimension')
     parser.add_argument('--num-heads', type=int, default=4, help='Number of attention heads')
     parser.add_argument('--num-layers', type=int, default=4, help='Number of encoder layers')
     parser.add_argument('--d-ff', type=int, default=512, help='Feed-forward dimension')
-    parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
+    parser.add_argument('--dropout', type=float, default=0, help='Dropout rate')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
 
@@ -156,6 +161,15 @@ def main():
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
+
+    # random.seed(args.seed)
+    # np.random.seed(args.seed)
+    # torch.manual_seed(args.seed)
+    # if torch.cuda.is_available():
+    #     torch.cuda.manual_seed_all(args.seed)
+    #     torch.backends.cudnn.deterministic = True
+    #     torch.backends.cudnn.benchmark = False
+    #
 
     # Create output directory for this encoding type
     output_dir = Path(args.output_dir) / args.encoding
@@ -168,6 +182,20 @@ def main():
     train_loader, val_loader, test_loader = create_dataloaders(
         args.data_dir, args.batch_size
     )
+
+
+
+    # g = torch.Generator(device='cpu').manual_seed(args.seed)
+    # train_loader = DataLoader(
+    #     train_loader.dataset,
+    #     batch_size=args.batch_size,
+    #     shuffle=True,
+    #     num_workers=train_loader.num_workers,
+    #     collate_fn=train_loader.collate_fn,
+    #     generator=g,   # 关键：固定打乱
+    # )
+
+
 
     # Create model
     model = create_model(
@@ -182,9 +210,10 @@ def main():
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # TODO: Initialize optimizer (Adam recommended)
-    # TODO: Initialize loss function (use nn.CrossEntropyLoss)
-    # TODO: Initialize learning rate scheduler (ReduceLROnPlateau recommended)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    criterion = nn.CrossEntropyLoss()
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
+                                                     factor=0.5, patience=3, verbose=True)
 
     # Training history
     history = {
@@ -195,6 +224,13 @@ def main():
     }
 
     best_val_acc = 0
+
+
+
+        # lengths = []
+        # for b in val_loader:
+        #     lengths += b['length'].tolist()
+        #
 
     # Training loop
     for epoch in range(args.epochs):
@@ -209,8 +245,7 @@ def main():
         val_loss, val_acc = evaluate(
             model, val_loader, criterion, args.device
         )
-
-        # TODO: Step learning rate scheduler (pass val_loss)
+        scheduler.step(val_loss)
 
         # Log results
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2%}")
